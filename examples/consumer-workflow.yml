@@ -33,6 +33,10 @@ on:
 
 jobs:
   analyse:
-    uses: YOUR_ORG/commit-analyser-mcp/.github/workflows/main.yml@main
+    uses: YOUR_ORG/Git_CR_MCP/.github/workflows/main.yml@main
+    # Required: the called workflow cannot grant itself permissions higher than
+    # what the caller provides. contents: write is needed to update the Wiki.
+    permissions:
+      contents: write
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

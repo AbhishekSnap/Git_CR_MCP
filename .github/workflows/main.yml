@@ -18,11 +18,7 @@ on:
     secrets:
       ANTHROPIC_API_KEY:
         required: true
-        description: >
-          Anthropic API key used to call Claude for commit analysis.
-          Add this as a repository secret in the consumer repo.
-      # GITHUB_TOKEN is automatically available from the Actions context —
-      # it does NOT need to be declared here as a workflow_call secret.
+        description: "Anthropic API key for Claude. Add to consumer repo secrets."
 
 jobs:
   analyse-commit:
@@ -31,10 +27,6 @@ jobs:
 
     # Never let a failed analysis block the caller's workflow
     continue-on-error: true
-
-    # The GITHUB_TOKEN needs write permission to update the wiki (contents API)
-    permissions:
-      contents: write
 
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────────────────
