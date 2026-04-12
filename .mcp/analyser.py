@@ -86,7 +86,7 @@ def analyse_with_claude(commit_raw: str, diff_raw: str, stats_raw: str) -> dict:
     system_prompt = (
         "You are a senior software engineer reviewing a git commit.\n"
         "Analyse the provided commit data and return a JSON object with exactly "
-        "these five keys:\n"
+        "these six keys:\n"
         '  "plain_summary"      : 2-3 sentence plain-English description of what '
         "changed (non-technical, suitable for a project manager)\n"
         '  "technical_summary"  : 2-3 sentence technical description referencing '
@@ -96,9 +96,16 @@ def analyse_with_claude(commit_raw: str, diff_raw: str, stats_raw: str) -> dict:
         '  "quality"            : one-line commit quality assessment starting with '
         '"Good" or "Needs improvement", followed by an em-dash and a short reason '
         "(e.g. \"Good \u2014 clear message, focused change, tests included\")\n"
-        '  "risk_level"         : one of: Low | Medium | High — followed by an '
+        '  "risk_level"         : one of: Low | Medium | High \u2014 followed by an '
         'em-dash and one-line reason (e.g. "Low \u2014 isolated utility module, '
-        'no side effects on existing code")\n\n'
+        'no side effects on existing code")\n'
+        '  "suggested_message"  : if the original commit message is clear, '
+        "follows conventional commits format (type: description), and accurately "
+        "reflects the change, return the original message unchanged. If it is "
+        "vague, missing a type prefix, or inaccurate, return an improved message "
+        "following the format: type(scope): concise description — where scope is "
+        "optional. Examples: \"fix(parser): handle UK date format edge cases\", "
+        "\"feat(auth): add JWT refresh token support\"\n\n"
         "Return ONLY valid JSON. No markdown fences, no extra text."
     )
 
@@ -118,7 +125,7 @@ def analyse_with_claude(commit_raw: str, diff_raw: str, stats_raw: str) -> dict:
     log.info("Sending commit data to Claude (%s)", CLAUDE_MODEL)
     response = client.messages.create(
         model=CLAUDE_MODEL,
-        max_tokens=1200,
+        max_tokens=1400,
         system=system_prompt,
         messages=[{"role": "user", "content": user_message}],
     )
@@ -175,10 +182,19 @@ def format_entry(commit_raw: str, stats_raw: str, analysis: dict) -> str:
 
     commit_url = f"https://github.com/{OWNER}/{REPO}/commit/{commit['sha']}"
 
+    # Only surface the suggested message if it differs from what was written
+    suggested = analysis.get("suggested_message", "").strip()
+    suggestion_line = (
+        f"**Suggested message:** `{suggested}`\n\n"
+        if suggested and suggested != first_line
+        else ""
+    )
+
     return (
         f"---\n"
         f"[**{sha_short}**]({commit_url}) | {time_str} | {author} | `{BRANCH_NAME}`\n\n"
         f"**Message:** {first_line}\n\n"
+        f"{suggestion_line}"
         f"**What changed:** {analysis['plain_summary']}\n\n"
         f"**Technical:** {analysis['technical_summary']}\n\n"
         f"**Type:** {analysis['change_type']} | "
@@ -195,17 +211,23 @@ def format_entry(commit_raw: str, stats_raw: str, analysis: dict) -> str:
 
 def update_wiki(new_entry: str) -> None:
     """
-    Append new_entry to the GitHub Wiki Home.md under today's date heading.
+    Write new_entry to a per-day wiki page: YYYY-MM-DD.md
 
-    Strategy: clone the wiki git repo, edit Home.md, commit, push.
-    The Contents API (/repos/{owner}/{repo}.wiki/contents/) is not officially
-    supported for wikis — git is the only reliable mechanism.
+    Strategy: clone the wiki git repo, create or append to today's page, push.
+    Each calendar day (UTC) gets its own wiki page — the sidebar lists them
+    as separate pages ordered by date.
+
+    Page structure:
+      # YYYY-MM-DD          ← H1 title (created once on first commit of the day)
+      {entry}               ← newest entry at the top, each separated by ---
+      {older entries}
     """
     import subprocess
     import tempfile
 
-    today_heading = datetime.now(timezone.utc).strftime("## %Y-%m-%d")
-    wiki_git_url  = (
+    today_date   = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today_file   = f"{today_date}.md"
+    wiki_git_url = (
         f"https://x-access-token:{GITHUB_TOKEN}@github.com/{OWNER}/{REPO}.wiki.git"
     )
 
@@ -217,45 +239,32 @@ def update_wiki(new_entry: str) -> None:
             check=True, capture_output=True, text=True,
         )
 
-        home_path = os.path.join(tmpdir, "Home.md")
+        page_path = os.path.join(tmpdir, today_file)
 
-        # ── Read current content ───────────────────────────────────────────────
-        if os.path.exists(home_path):
-            with open(home_path, "r", encoding="utf-8") as f:
+        # ── Read or initialise today's page ───────────────────────────────────
+        if os.path.exists(page_path):
+            with open(page_path, "r", encoding="utf-8") as f:
                 current_content = f.read()
-            log.info("Read existing Home.md (%d chars)", len(current_content))
+            log.info("Appending to existing wiki page: %s", today_file)
         else:
-            current_content = ""
-            log.info("Home.md not found in wiki — will create it")
+            # First commit of the day — create the page with an H1 title
+            current_content = f"# {today_date}\n"
+            log.info("Creating new wiki page: %s", today_file)
 
-        # ── Build updated content ──────────────────────────────────────────────
-        if today_heading in current_content:
-            # Heading exists — insert entry immediately after it
-            lines = current_content.split("\n")
-            heading_idx = next(
-                (i for i, line in enumerate(lines) if line.strip() == today_heading),
-                None,
+        # ── Insert new entry at the top (after H1), newest commits first ───────
+        if current_content.startswith("# "):
+            first_newline   = current_content.index("\n")
+            updated_content = (
+                current_content[: first_newline + 1]
+                + "\n"
+                + new_entry
+                + current_content[first_newline + 1 :]
             )
-            if heading_idx is not None:
-                lines.insert(heading_idx + 1, "\n" + new_entry)
-                updated_content = "\n".join(lines)
-            else:
-                updated_content = current_content + f"\n{today_heading}\n\n{new_entry}\n"
         else:
-            # New day — prepend heading + entry, preserve existing H1 title if present
-            new_section = f"\n{today_heading}\n\n{new_entry}\n"
-            if current_content.startswith("# "):
-                first_newline   = current_content.index("\n")
-                updated_content = (
-                    current_content[: first_newline + 1]
-                    + new_section
-                    + current_content[first_newline + 1 :]
-                )
-            else:
-                updated_content = "# Commit Analysis Log\n" + new_section + current_content
+            updated_content = new_entry + current_content
 
         # ── Write ──────────────────────────────────────────────────────────────
-        with open(home_path, "w", encoding="utf-8") as f:
+        with open(page_path, "w", encoding="utf-8") as f:
             f.write(updated_content)
 
         # ── Commit and push ────────────────────────────────────────────────────
@@ -269,7 +278,7 @@ def update_wiki(new_entry: str) -> None:
             cwd=tmpdir, check=True, capture_output=True, env=env,
         )
         subprocess.run(
-            ["git", "add", "Home.md"],
+            ["git", "add", today_file],
             cwd=tmpdir, check=True, capture_output=True, env=env,
         )
         subprocess.run(
