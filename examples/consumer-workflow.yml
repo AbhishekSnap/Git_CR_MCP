@@ -1,0 +1,38 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Commit Analyser — Consumer Workflow
+# ─────────────────────────────────────────────────────────────────────────────
+# Copy this file into your repository at:
+#   .github/workflows/commit-analyser.yml
+#
+# Then replace YOUR_ORG below with the GitHub organisation (or username) where
+# the commit-analyser-mcp repository lives.
+#
+# Prerequisites (one-time setup per repo):
+#   1. Enable the GitHub Wiki on your repository
+#      (Settings > Features > Wikis — tick the checkbox)
+#      Then create the first wiki page manually so the wiki git repo is
+#      initialised. The analyser will handle all future updates automatically.
+#
+#   2. Add ANTHROPIC_API_KEY as a repository secret
+#      (Settings > Secrets and variables > Actions > New repository secret)
+#
+#   3. Allow Actions to write to the repository
+#      (Settings > Actions > General > Workflow permissions > Read and write)
+#
+#   4. Push a commit and check your Wiki — a new entry will appear within
+#      about 30 seconds.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Analyse Commits
+
+on:
+  push:
+    branches:
+      - "**"      # Run on every push to any branch.
+                  # To limit to specific branches, use e.g.: ["main", "develop"]
+
+jobs:
+  analyse:
+    uses: YOUR_ORG/commit-analyser-mcp/.github/workflows/main.yml@main
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
