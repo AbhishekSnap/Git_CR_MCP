@@ -7,24 +7,21 @@ Orchestrates the full commit-analysis pipeline:
   2. Calls get_commit, get_commit_diff, get_commit_stats via MCP
   3. Sends all data to Claude (claude-sonnet-4-5-20250929) for structured analysis
   4. Formats the result as a markdown Wiki entry
-  5. Appends the entry to GitHub Wiki Home.md via the GitHub Contents API
+  5. Appends the entry to GitHub Wiki Home.md via git clone → commit → push
 
 All errors are caught and logged — this script never exits non-zero so that
 a failed analysis cannot break the upstream commit push.
 """
 
 import asyncio
-import base64
 import json
 import logging
 import os
 import sys
-import time
 from contextlib import AsyncExitStack
 from datetime import datetime, timezone
 from pathlib import Path
 
-import requests
 from anthropic import Anthropic
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -52,16 +49,6 @@ if "/" in REPO_NAME:
     OWNER, REPO = REPO_NAME.split("/", 1)
 else:
     OWNER, REPO = "", REPO_NAME
-
-# ── GitHub API headers (used for wiki updates) ────────────────────────────────
-GH_HEADERS = {
-    "Authorization": f"Bearer {GITHUB_TOKEN}",
-    "Accept": "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-}
-
-# Wiki contents API — the wiki is addressed as "{repo}.wiki" in GitHub's API
-WIKI_URL = f"https://api.github.com/repos/{OWNER}/{REPO}.wiki/contents/Home.md"
 
 # Maximum diff characters to send to Claude (avoids huge token costs)
 MAX_DIFF_CHARS = 6_000
@@ -197,62 +184,48 @@ def format_entry(commit_raw: str, stats_raw: str, analysis: dict) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GitHub Wiki update
+# GitHub Wiki update (git-based — the Contents API is not supported for wikis)
 # ─────────────────────────────────────────────────────────────────────────────
-
-def _put_wiki(content_str: str, commit_msg: str, current_sha: str | None) -> None:
-    """PUT the updated Home.md content to the wiki via GitHub Contents API."""
-    encoded = base64.b64encode(content_str.encode("utf-8")).decode("ascii")
-    body = {
-        "message": commit_msg,
-        "content": encoded,
-        "committer": {
-            "name": "Commit Analyser Bot",
-            "email": "bot@github-actions",
-        },
-    }
-    if current_sha:
-        body["sha"] = current_sha   # required for updates; omit for creates
-
-    resp = requests.put(WIKI_URL, headers=GH_HEADERS, json=body, timeout=15)
-    resp.raise_for_status()
-    log.info("Wiki PUT succeeded (status %s)", resp.status_code)
-
 
 def update_wiki(new_entry: str) -> None:
     """
-    Append new_entry to GitHub Wiki Home.md under today's date heading.
+    Append new_entry to the GitHub Wiki Home.md under today's date heading.
 
-    Strategy:
-    - GET current Home.md content
-    - 404  → wiki is empty/new, create the file from scratch
-    - 200  → decode, find or insert today's heading, append entry
-    - PUT  the updated content back
-    - 409  → retry once (concurrent write conflict)
+    Strategy: clone the wiki git repo, edit Home.md, commit, push.
+    The Contents API (/repos/{owner}/{repo}.wiki/contents/) is not officially
+    supported for wikis — git is the only reliable mechanism.
     """
+    import subprocess
+    import tempfile
+
     today_heading = datetime.now(timezone.utc).strftime("## %Y-%m-%d")
-    commit_msg    = f"docs: add commit analysis for {COMMIT_SHA[:7]}"
+    wiki_git_url  = (
+        f"https://x-access-token:{GITHUB_TOKEN}@github.com/{OWNER}/{REPO}.wiki.git"
+    )
 
-    for attempt in range(2):
-        get_resp = requests.get(WIKI_URL, headers=GH_HEADERS, timeout=15)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # ── Clone ─────────────────────────────────────────────────────────────
+        log.info("Cloning wiki repo: github.com/%s/%s.wiki", OWNER, REPO)
+        subprocess.run(
+            ["git", "clone", "--depth", "1", wiki_git_url, tmpdir],
+            check=True, capture_output=True, text=True,
+        )
 
-        if get_resp.status_code == 404:
-            log.info("Wiki Home.md not found — creating fresh file")
-            current_sha     = None
-            current_content = ""
-        elif get_resp.status_code == 200:
-            data            = get_resp.json()
-            current_sha     = data["sha"]
-            # GitHub base64 may include line-wrapped newlines — b64decode handles it
-            current_content = base64.b64decode(data["content"]).decode("utf-8")
+        home_path = os.path.join(tmpdir, "Home.md")
+
+        # ── Read current content ───────────────────────────────────────────────
+        if os.path.exists(home_path):
+            with open(home_path, "r", encoding="utf-8") as f:
+                current_content = f.read()
+            log.info("Read existing Home.md (%d chars)", len(current_content))
         else:
-            get_resp.raise_for_status()
-            return  # unreachable but satisfies linter
+            current_content = ""
+            log.info("Home.md not found in wiki — will create it")
 
-        # Build updated content
+        # ── Build updated content ──────────────────────────────────────────────
         if today_heading in current_content:
-            # Heading already exists — insert the new entry immediately after it
-            lines       = current_content.split("\n")
+            # Heading exists — insert entry immediately after it
+            lines = current_content.split("\n")
             heading_idx = next(
                 (i for i, line in enumerate(lines) if line.strip() == today_heading),
                 None,
@@ -263,10 +236,9 @@ def update_wiki(new_entry: str) -> None:
             else:
                 updated_content = current_content + f"\n{today_heading}\n\n{new_entry}\n"
         else:
-            # New day — prepend heading + entry, preserving any existing H1 title
+            # New day — prepend heading + entry, preserve existing H1 title if present
             new_section = f"\n{today_heading}\n\n{new_entry}\n"
             if current_content.startswith("# "):
-                # Keep the H1 title line at the very top
                 first_newline   = current_content.index("\n")
                 updated_content = (
                     current_content[: first_newline + 1]
@@ -274,19 +246,35 @@ def update_wiki(new_entry: str) -> None:
                     + current_content[first_newline + 1 :]
                 )
             else:
-                updated_content = (
-                    "# Commit Analysis Log\n" + new_section + current_content
-                )
+                updated_content = "# Commit Analysis Log\n" + new_section + current_content
 
-        try:
-            _put_wiki(updated_content, commit_msg, current_sha)
-            return   # success
-        except requests.HTTPError as exc:
-            if exc.response is not None and exc.response.status_code == 409 and attempt == 0:
-                log.warning("Wiki conflict (409) on attempt %d — retrying", attempt + 1)
-                time.sleep(1)
-                continue
-            raise
+        # ── Write ──────────────────────────────────────────────────────────────
+        with open(home_path, "w", encoding="utf-8") as f:
+            f.write(updated_content)
+
+        # ── Commit and push ────────────────────────────────────────────────────
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+        subprocess.run(
+            ["git", "config", "user.email", "bot@github-actions"],
+            cwd=tmpdir, check=True, capture_output=True, env=env,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Commit Analyser Bot"],
+            cwd=tmpdir, check=True, capture_output=True, env=env,
+        )
+        subprocess.run(
+            ["git", "add", "Home.md"],
+            cwd=tmpdir, check=True, capture_output=True, env=env,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", f"docs: add commit analysis for {COMMIT_SHA[:7]}"],
+            cwd=tmpdir, check=True, capture_output=True, env=env,
+        )
+        subprocess.run(
+            ["git", "push"],
+            cwd=tmpdir, check=True, capture_output=True, env=env,
+        )
+        log.info("Wiki updated successfully via git push")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
