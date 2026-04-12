@@ -7,7 +7,9 @@
 # Usage in a consumer repo:
 #   jobs:
 #     analyse:
-#       uses: YOUR_ORG/commit-analyser-mcp/.github/workflows/main.yml@main
+#       uses: AbhishekSnap/Git_CR_MCP/.github/workflows/main.yml@main
+#       permissions:
+#         contents: write
 #       secrets:
 #         ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
@@ -29,9 +31,9 @@ jobs:
     continue-on-error: true
 
     steps:
-      # ── 1. Checkout the tool repo (Git_CR_MCP) to get .mcp/ scripts ──────────
-      # The caller's commit data comes via env vars + GitHub API — we don't need
-      # to check out the caller's repo. The github.* context already points to it.
+      # ── 1. Checkout Git_CR_MCP to get the .mcp/ scripts ──────────────────────
+      # The caller's commit data arrives via env vars + GitHub API calls.
+      # The github.* context (sha, repository, token) still refers to the caller.
       - name: Checkout analyser tool (Git_CR_MCP)
         uses: actions/checkout@v4
         with:
@@ -54,10 +56,10 @@ jobs:
           # Claude API key (passed in via workflow_call secret)
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
-          # Built-in GitHub Actions token — automatically available, no secret needed
+          # Built-in GitHub Actions token — scoped to the caller's repo
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-          # Commit context — sourced from the GitHub Actions event payload
+          # Commit context — from the caller's event payload
           COMMIT_SHA:       ${{ github.sha }}
           COMMIT_MESSAGE:   ${{ github.event.head_commit.message }}
           COMMIT_AUTHOR:    ${{ github.event.head_commit.author.name }}
