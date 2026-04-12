@@ -29,20 +29,20 @@ jobs:
     continue-on-error: true
 
     steps:
-      # ── 1. Checkout ──────────────────────────────────────────────────────────
-      - name: Checkout repository
+      # ── 1. Checkout the tool repo (Git_CR_MCP) to get .mcp/ scripts ──────────
+      # The caller's commit data comes via env vars + GitHub API — we don't need
+      # to check out the caller's repo. The github.* context already points to it.
+      - name: Checkout analyser tool (Git_CR_MCP)
         uses: actions/checkout@v4
         with:
-          # fetch-depth 2 gives access to the parent commit for diff context
-          fetch-depth: 2
+          repository: AbhishekSnap/Git_CR_MCP
+          ref: main
 
       # ── 2. Python setup ───────────────────────────────────────────────────────
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"
-          cache-dependency-path: ".mcp/requirements.txt"
 
       # ── 3. Install dependencies ───────────────────────────────────────────────
       - name: Install dependencies
