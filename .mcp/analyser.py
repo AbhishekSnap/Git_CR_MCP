@@ -79,14 +79,14 @@ async def call_tool(session: ClientSession, tool_name: str, **kwargs) -> str:
 def analyse_with_claude(commit_raw: str, diff_raw: str, stats_raw: str) -> dict:
     """
     Send commit data to Claude and return a structured analysis dict with keys:
-      plain_summary, technical_summary, change_type, quality
+      plain_summary, technical_summary, change_type, quality, risk_level
     """
     client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
     system_prompt = (
         "You are a senior software engineer reviewing a git commit.\n"
         "Analyse the provided commit data and return a JSON object with exactly "
-        "these four keys:\n"
+        "these five keys:\n"
         '  "plain_summary"      : 2-3 sentence plain-English description of what '
         "changed (non-technical, suitable for a project manager)\n"
         '  "technical_summary"  : 2-3 sentence technical description referencing '
@@ -95,7 +95,10 @@ def analyse_with_claude(commit_raw: str, diff_raw: str, stats_raw: str) -> dict:
         "Chore | Docs | Tests | Performance | Security\n"
         '  "quality"            : one-line commit quality assessment starting with '
         '"Good" or "Needs improvement", followed by an em-dash and a short reason '
-        "(e.g. \"Good \u2014 clear message, focused change, tests included\")\n\n"
+        "(e.g. \"Good \u2014 clear message, focused change, tests included\")\n"
+        '  "risk_level"         : one of: Low | Medium | High — followed by an '
+        'em-dash and one-line reason (e.g. "Low \u2014 isolated utility module, '
+        'no side effects on existing code")\n\n'
         "Return ONLY valid JSON. No markdown fences, no extra text."
     )
 
@@ -115,7 +118,7 @@ def analyse_with_claude(commit_raw: str, diff_raw: str, stats_raw: str) -> dict:
     log.info("Sending commit data to Claude (%s)", CLAUDE_MODEL)
     response = client.messages.create(
         model=CLAUDE_MODEL,
-        max_tokens=1024,
+        max_tokens=1200,
         system=system_prompt,
         messages=[{"role": "user", "content": user_message}],
     )
@@ -170,14 +173,17 @@ def format_entry(commit_raw: str, stats_raw: str, analysis: dict) -> str:
     total_del  = stats.get("stats", {}).get("deletions", 0)
     file_count = len(stats.get("files", []))
 
+    commit_url = f"https://github.com/{OWNER}/{REPO}/commit/{commit['sha']}"
+
     return (
         f"---\n"
-        f"**{sha_short}** | {time_str} | {author} | `{BRANCH_NAME}`\n\n"
+        f"[**{sha_short}**]({commit_url}) | {time_str} | {author} | `{BRANCH_NAME}`\n\n"
         f"**Message:** {first_line}\n\n"
         f"**What changed:** {analysis['plain_summary']}\n\n"
         f"**Technical:** {analysis['technical_summary']}\n\n"
         f"**Type:** {analysis['change_type']} | "
-        f"**Quality:** {analysis['quality']}\n\n"
+        f"**Quality:** {analysis['quality']} | "
+        f"**Risk:** {analysis['risk_level']}\n\n"
         f"**Files changed:**\n{files_md}\n\n"
         f"**Stats:** {file_count} files | +{total_add} lines | -{total_del} lines\n"
     )
