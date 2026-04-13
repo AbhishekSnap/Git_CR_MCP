@@ -89,8 +89,15 @@ def analyse_with_claude(commit_raw: str, diff_raw: str, stats_raw: str) -> dict:
         "these six keys:\n"
         '  "plain_summary"      : 2-3 sentence plain-English description of what '
         "changed (non-technical, suitable for a project manager)\n"
-        '  "technical_summary"  : 2-3 sentence technical description referencing '
-        "specific files, functions, or patterns changed\n"
+        '  "technical_summary"  : detailed per-file technical breakdown for a code '
+        "reviewer who has the diff open. For EACH file changed, produce a section "
+        "using this exact structure (use literal \\n for line breaks inside the "
+        "JSON string): \"**filename.py**\\n- FunctionOrClass: what specifically "
+        "changed — new parameters, altered logic, removed behaviour, etc.\\n- ...\""
+        " Reference exact function names, class names, decorators, and constants. "
+        "A reviewer should be able to open each file and navigate it using your "
+        "description. Do not summarise vaguely — be precise about what each "
+        "function does differently after this commit.\n"
         '  "change_type"        : exactly one of: Bug Fix | Feature | Refactor | '
         "Chore | Docs | Tests | Performance | Security\n"
         '  "quality"            : one-line commit quality assessment starting with '
@@ -125,7 +132,7 @@ def analyse_with_claude(commit_raw: str, diff_raw: str, stats_raw: str) -> dict:
     log.info("Sending commit data to Claude (%s)", CLAUDE_MODEL)
     response = client.messages.create(
         model=CLAUDE_MODEL,
-        max_tokens=1400,
+        max_tokens=2000,
         system=system_prompt,
         messages=[{"role": "user", "content": user_message}],
     )
@@ -196,7 +203,7 @@ def format_entry(commit_raw: str, stats_raw: str, analysis: dict) -> str:
         f"**Message:** {first_line}\n\n"
         f"{suggestion_line}"
         f"**What changed:** {analysis['plain_summary']}\n\n"
-        f"**Technical:** {analysis['technical_summary']}\n\n"
+        f"**Technical Breakdown:**\n{analysis['technical_summary']}\n\n"
         f"**Type:** {analysis['change_type']} | "
         f"**Quality:** {analysis['quality']} | "
         f"**Risk:** {analysis['risk_level']}\n\n"
