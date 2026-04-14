@@ -113,6 +113,107 @@ def get_commit_stats(owner: str, repo: str, sha: str) -> dict:
     }
 
 
+# ── PR Tools ──────────────────────────────────────────────────────────────────
+
+@mcp.tool()
+def get_pull_request(owner: str, repo: str, pr_number: int) -> dict:
+    """
+    Fetch full PR metadata: title, body, state, merged, author, base/head branches,
+    labels, milestone, created_at, merged_at, closed_at, additions, deletions,
+    changed_files, review_comments, commits count.
+    """
+    return gh_get(f"{API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}")
+
+
+@mcp.tool()
+def get_pr_files(owner: str, repo: str, pr_number: int) -> list:
+    """
+    List all files changed in the PR.
+    Returns: [{"filename", "status", "additions", "deletions", "changes"}, ...]
+    """
+    data = gh_get(f"{API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/files")
+    return [
+        {
+            "filename": f["filename"],
+            "status": f["status"],
+            "additions": f.get("additions", 0),
+            "deletions": f.get("deletions", 0),
+            "changes": f.get("changes", 0),
+        }
+        for f in data
+    ]
+
+
+@mcp.tool()
+def get_pr_commits(owner: str, repo: str, pr_number: int) -> list:
+    """
+    List all commits in the PR (up to 250 via GitHub default pagination).
+    Returns: [{"sha", "message", "author", "date"}, ...]
+    """
+    data = gh_get(f"{API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/commits")
+    return [
+        {
+            "sha": c["sha"][:7],
+            "message": c["commit"]["message"].split("\n")[0],
+            "author": c["commit"]["author"]["name"],
+            "date": c["commit"]["author"]["date"],
+        }
+        for c in data
+    ]
+
+
+@mcp.tool()
+def get_pr_reviews(owner: str, repo: str, pr_number: int) -> list:
+    """
+    List all submitted reviews on the PR.
+    Returns: [{"reviewer", "state", "submitted_at", "body"}, ...]
+    State is one of: APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED.
+    """
+    data = gh_get(f"{API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/reviews")
+    return [
+        {
+            "reviewer": r["user"]["login"],
+            "state": r["state"],
+            "submitted_at": r["submitted_at"],
+            "body": (r.get("body") or "")[:200],
+        }
+        for r in data
+    ]
+
+
+@mcp.tool()
+def get_pr_requested_reviewers(owner: str, repo: str, pr_number: int) -> dict:
+    """
+    List users and teams requested as reviewers but who have not yet reviewed.
+    Returns: {"users": [...], "teams": [...]}
+    """
+    data = gh_get(f"{API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/requested_reviewers")
+    return {
+        "users": [u["login"] for u in data.get("users", [])],
+        "teams": [t["name"] for t in data.get("teams", [])],
+    }
+
+
+@mcp.tool()
+def get_pr_checks(owner: str, repo: str, head_sha: str) -> list:
+    """
+    List CI check runs for the PR's head commit.
+    Returns: [{"name", "status", "conclusion", "started_at", "completed_at"}, ...]
+    conclusion is one of: success, failure, neutral, cancelled, skipped, timed_out, action_required.
+    """
+    data = gh_get(f"{API_BASE}/repos/{owner}/{repo}/commits/{head_sha}/check-runs")
+    return [
+        {
+            "name": r["name"],
+            "status": r["status"],
+            "conclusion": r.get("conclusion", "pending"),
+            "started_at": r.get("started_at", ""),
+            "completed_at": r.get("completed_at", ""),
+        }
+        for r in data.get("check_runs", [])
+    ]
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     log.info("Starting MCP server via stdio transport")

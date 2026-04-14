@@ -21,6 +21,31 @@ on:
       ANTHROPIC_API_KEY:
         required: true
         description: "Anthropic API key for Claude. Add to consumer repo secrets."
+    inputs:
+      pr_number:
+        required: false
+        type: string
+        default: ""
+      pr_action:
+        required: false
+        type: string
+        default: ""
+      pr_title:
+        required: false
+        type: string
+        default: ""
+      pr_author:
+        required: false
+        type: string
+        default: ""
+      pr_base_branch:
+        required: false
+        type: string
+        default: ""
+      pr_head_branch:
+        required: false
+        type: string
+        default: ""
 
 jobs:
   analyse-commit:
@@ -52,6 +77,7 @@ jobs:
 
       # ── 4. Run analyser ───────────────────────────────────────────────────────
       - name: Run commit analyser
+        if: ${{ inputs.pr_number == '' }}
         env:
           # Claude API key (passed in via workflow_call secret)
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -68,3 +94,18 @@ jobs:
           REPO_NAME:        ${{ github.repository }}
 
         run: python .mcp/analyser.py
+
+      # ── 5. Run PR analyser ────────────────────────────────────────────────────
+      - name: Run PR analyser
+        if: ${{ inputs.pr_number != '' }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN:      ${{ secrets.GITHUB_TOKEN }}
+          REPO_NAME:         ${{ github.repository }}
+          PR_NUMBER:         ${{ inputs.pr_number }}
+          PR_ACTION:         ${{ inputs.pr_action }}
+          PR_TITLE:          ${{ inputs.pr_title }}
+          PR_AUTHOR:         ${{ inputs.pr_author }}
+          PR_BASE_BRANCH:    ${{ inputs.pr_base_branch }}
+          PR_HEAD_BRANCH:    ${{ inputs.pr_head_branch }}
+        run: python .mcp/pr-analyser.py
