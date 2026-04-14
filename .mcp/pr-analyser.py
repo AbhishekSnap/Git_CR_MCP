@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import sys
+import time
 from contextlib import AsyncExitStack
 from datetime import datetime, timezone
 from pathlib import Path
@@ -430,6 +431,10 @@ async def run_analysis() -> None:
         log.info("MCP session initialised — server ready")
 
         pr_num = int(PR_NUMBER)
+
+        # Brief pause to allow GitHub API to reflect the latest PR state
+        log.info("Waiting 10 seconds for GitHub API to settle...")
+        time.sleep(10)
 
         # ── Step 1: Collect data via MCP tools ────────────────────────────────
         log.info("Fetching PR metadata (#%s)", PR_NUMBER)
