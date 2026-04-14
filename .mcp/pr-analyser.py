@@ -441,6 +441,7 @@ async def run_analysis() -> None:
         pr_raw = await call_tool(
             session, "get_pull_request", owner=OWNER, repo=REPO, pr_number=pr_num
         )
+        log.info("PR RAW (first 300 chars): %s", pr_raw[:300])
 
         # Extract head SHA for CI checks
         try:
@@ -452,11 +453,13 @@ async def run_analysis() -> None:
         files_raw = await call_tool(
             session, "get_pr_files", owner=OWNER, repo=REPO, pr_number=pr_num
         )
+        log.info("FILES RAW (first 300 chars): %s", files_raw[:300])
 
         log.info("Fetching PR commits")
         commits_raw = await call_tool(
             session, "get_pr_commits", owner=OWNER, repo=REPO, pr_number=pr_num
         )
+        log.info("COMMITS RAW (first 300 chars): %s", commits_raw[:300])
 
         log.info("Fetching PR reviews")
         reviews_raw = await call_tool(
