@@ -127,32 +127,33 @@ def analyse_pr_with_claude(
     except (json.JSONDecodeError, AttributeError):
         pr_body = "No description provided."
 
+    files = []
     try:
-        files = json.loads(files_raw)[:50]  # cap at 50 files
+        files = json.loads(files_raw).get("files", [])[:50]
         files_lines = "\n".join(
             f"{f['filename']} | {f['status']} | +{f['additions']} -{f['deletions']}"
             for f in files
         )
-    except (json.JSONDecodeError, TypeError):
+    except (json.JSONDecodeError, TypeError, AttributeError):
         files_lines = "No file data available."
 
     commits = []
     try:
-        commits = json.loads(commits_raw)[:30]  # cap at 30 commits
+        commits = json.loads(commits_raw).get("commits", [])[:30]
         commits_lines = "\n".join(
             f"{c['sha']} | {c['message']} | {c['author']}"
             for c in commits
         )
-    except (json.JSONDecodeError, TypeError):
+    except (json.JSONDecodeError, TypeError, AttributeError):
         commits_lines = "No commit data available."
 
     try:
-        reviews = json.loads(reviews_raw)
+        reviews = json.loads(reviews_raw).get("reviews", [])
         reviews_lines = "\n".join(
             f"{r['reviewer']} | {r['state']} | {r['body']}"
             for r in reviews
         ) or "No reviews yet."
-    except (json.JSONDecodeError, TypeError):
+    except (json.JSONDecodeError, TypeError, AttributeError):
         reviews_lines = "No reviews yet."
 
     try:
@@ -221,18 +222,18 @@ def format_pr_entry(
         pr = {}
 
     try:
-        files = json.loads(files_raw)[:50]
-    except (json.JSONDecodeError, TypeError):
+        files = json.loads(files_raw).get("files", [])[:50]
+    except (json.JSONDecodeError, TypeError, AttributeError):
         files = []
 
     try:
-        commits = json.loads(commits_raw)[:30]
-    except (json.JSONDecodeError, TypeError):
+        commits = json.loads(commits_raw).get("commits", [])[:30]
+    except (json.JSONDecodeError, TypeError, AttributeError):
         commits = []
 
     try:
-        checks = json.loads(checks_raw)
-    except (json.JSONDecodeError, TypeError):
+        checks = json.loads(checks_raw).get("checks", [])
+    except (json.JSONDecodeError, TypeError, AttributeError):
         checks = []
 
     # Determine badge — closed action splits on merged field
