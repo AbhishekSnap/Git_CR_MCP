@@ -520,8 +520,11 @@ async def main() -> None:
 
     except Exception as exc:
         log.error("PR analysis failed (non-blocking): %s", exc, exc_info=True)
-        sys.exit(0)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception as exc:
+        log.error("Fatal error in event loop: %s", exc, exc_info=True)
+    sys.exit(0)

@@ -206,22 +206,24 @@ def get_pr_requested_reviewers(owner: str, repo: str, pr_number: int) -> dict:
 def get_pr_checks(owner: str, repo: str, head_sha: str) -> dict:
     """
     List CI check runs for the PR's head commit.
+    Deduplicates by check name — only the latest run per name is returned,
+    so repeated workflow runs on the same commit do not inflate the count.
     Returns: {"checks": [{"name", "status", "conclusion", "started_at", "completed_at"}, ...]}
-    conclusion is one of: success, failure, neutral, cancelled, skipped, timed_out, action_required.
     """
     data = gh_get(f"{API_BASE}/repos/{owner}/{repo}/commits/{head_sha}/check-runs")
-    return {
-        "checks": [
-            {
-                "name": r["name"],
+    # Keep only the latest run per check name (runs are returned newest-first by GitHub)
+    seen: dict[str, dict] = {}
+    for r in data.get("check_runs", []):
+        name = r["name"]
+        if name not in seen:
+            seen[name] = {
+                "name": name,
                 "status": r["status"],
                 "conclusion": r.get("conclusion", "pending"),
                 "started_at": r.get("started_at", ""),
                 "completed_at": r.get("completed_at", ""),
             }
-            for r in data.get("check_runs", [])
-        ]
-    }
+    return {"checks": list(seen.values())}
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
