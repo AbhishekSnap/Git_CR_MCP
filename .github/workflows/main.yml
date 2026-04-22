@@ -49,7 +49,7 @@ on:
 
 jobs:
   analyse-commit:
-    name: Analyse commit with Claude
+    name: Analyse with Claude
     runs-on: ubuntu-latest
 
     # Never let a failed analysis block the caller's workflow

@@ -19,7 +19,6 @@ import json
 import logging
 import os
 import sys
-import time
 from contextlib import AsyncExitStack
 from datetime import datetime, timezone
 from pathlib import Path
@@ -130,10 +129,14 @@ def analyse_pr_with_claude(
     files = []
     try:
         files = json.loads(files_raw).get("files", [])[:50]
-        files_lines = "\n".join(
-            f"{f['filename']} | {f['status']} | +{f['additions']} -{f['deletions']}"
-            for f in files
-        )
+        file_blocks = []
+        for f in files:
+            block = f"{f['filename']} | {f['status']} | +{f['additions']} -{f['deletions']}"
+            patch = (f.get("patch") or "").strip()
+            if patch:
+                block += f"\n{patch}"
+            file_blocks.append(block)
+        files_lines = "\n\n".join(file_blocks)
     except (json.JSONDecodeError, TypeError, AttributeError):
         files_lines = "No file data available."
 
@@ -164,12 +167,12 @@ def analyse_pr_with_claude(
         reviewers_line = "None"
 
     try:
-        checks = json.loads(checks_raw)
+        checks = json.loads(checks_raw).get("checks", [])
         checks_lines = "\n".join(
             f"{c['name']} | {c['status']} | {c['conclusion']}"
             for c in checks
         ) or "No CI checks found."
-    except (json.JSONDecodeError, TypeError):
+    except (json.JSONDecodeError, TypeError, AttributeError):
         checks_lines = "No CI checks found."
 
     user_message = (
@@ -436,7 +439,7 @@ async def run_analysis() -> None:
 
         # Brief pause to allow GitHub API to reflect the latest PR state
         log.info("Waiting 10 seconds for GitHub API to settle...")
-        time.sleep(10)
+        await asyncio.sleep(10)
 
         # ── Step 1: Collect data via MCP tools ────────────────────────────────
         log.info("Fetching PR metadata (#%s)", PR_NUMBER)

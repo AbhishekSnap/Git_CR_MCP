@@ -128,8 +128,9 @@ def get_pull_request(owner: str, repo: str, pr_number: int) -> dict:
 @mcp.tool()
 def get_pr_files(owner: str, repo: str, pr_number: int) -> dict:
     """
-    List all files changed in the PR.
-    Returns: {"files": [{"filename", "status", "additions", "deletions", "changes"}, ...]}
+    List all files changed in the PR, including the patch diff for each file.
+    Returns: {"files": [{"filename", "status", "additions", "deletions", "changes", "patch"}, ...]}
+    patch is capped at 1500 chars per file to keep token usage predictable.
     """
     data = gh_get(f"{API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/files")
     return {
@@ -140,6 +141,7 @@ def get_pr_files(owner: str, repo: str, pr_number: int) -> dict:
                 "additions": f.get("additions", 0),
                 "deletions": f.get("deletions", 0),
                 "changes": f.get("changes", 0),
+                "patch": (f.get("patch") or "")[:1500],
             }
             for f in data
         ]
