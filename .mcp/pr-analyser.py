@@ -136,6 +136,7 @@ def analyse_pr_with_claude(
     except (json.JSONDecodeError, TypeError):
         files_lines = "No file data available."
 
+    commits = []
     try:
         commits = json.loads(commits_raw)[:30]  # cap at 30 commits
         commits_lines = "\n".join(
@@ -175,7 +176,7 @@ def analyse_pr_with_claude(
         f"Author: {PR_AUTHOR}  |  {PR_BASE_BRANCH} ← {PR_HEAD_BRANCH}\n"
         f"Action: {PR_ACTION}\n\n"
         f"PR BODY (first 800 chars):\n{pr_body}\n\n"
-        f"COMMITS ({len(commits if 'commits' in dir() else [])} shown):\n{commits_lines}\n\n"
+        f"COMMITS ({len(commits)} shown):\n{commits_lines}\n\n"
         f"FILES CHANGED:\n{files_lines}\n\n"
         f"REVIEWS:\n{reviews_lines}\n\n"
         f"REQUESTED REVIEWERS: {reviewers_line}\n\n"
