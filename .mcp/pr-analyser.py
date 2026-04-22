@@ -89,7 +89,6 @@ def analyse_pr_with_claude(
     commits_raw: str,
     reviews_raw: str,
     reviewers_raw: str,
-    checks_raw: str,
 ) -> dict:
     """
     Send PR data to Claude and return a structured analysis dict with keys:
@@ -166,15 +165,6 @@ def analyse_pr_with_claude(
     except (json.JSONDecodeError, TypeError):
         reviewers_line = "None"
 
-    try:
-        checks = json.loads(checks_raw).get("checks", [])
-        checks_lines = "\n".join(
-            f"{c['name']} | {c['status']} | {c['conclusion']}"
-            for c in checks
-        ) or "No CI checks found."
-    except (json.JSONDecodeError, TypeError, AttributeError):
-        checks_lines = "No CI checks found."
-
     user_message = (
         f"PR #{PR_NUMBER}: {PR_TITLE}\n"
         f"Author: {PR_AUTHOR}  |  {PR_BASE_BRANCH} ← {PR_HEAD_BRANCH}\n"
@@ -183,8 +173,7 @@ def analyse_pr_with_claude(
         f"COMMITS ({len(commits)} shown):\n{commits_lines}\n\n"
         f"FILES CHANGED:\n{files_lines}\n\n"
         f"REVIEWS:\n{reviews_lines}\n\n"
-        f"REQUESTED REVIEWERS: {reviewers_line}\n\n"
-        f"CI CHECKS:\n{checks_lines}"
+        f"REQUESTED REVIEWERS: {reviewers_line}"
     )
 
     log.info("Sending PR data to Claude (%s)", CLAUDE_MODEL)
@@ -213,7 +202,6 @@ def format_pr_entry(
     pr_raw: str,
     files_raw: str,
     commits_raw: str,
-    checks_raw: str,
     analysis: dict,
 ) -> str:
     """
@@ -233,11 +221,6 @@ def format_pr_entry(
         commits = json.loads(commits_raw).get("commits", [])[:30]
     except (json.JSONDecodeError, TypeError, AttributeError):
         commits = []
-
-    try:
-        checks = json.loads(checks_raw).get("checks", [])
-    except (json.JSONDecodeError, TypeError, AttributeError):
-        checks = []
 
     # Determine badge — closed action splits on merged field
     action_key = PR_ACTION
@@ -270,17 +253,6 @@ def format_pr_entry(
         for c in commits
     ) or "- No commit data available"
 
-    # CI checks summary
-    if checks:
-        n_passed = sum(1 for c in checks if c.get("conclusion") == "success")
-        n_total = len(checks)
-        failing = [c["name"] for c in checks if c.get("conclusion") not in ("success", "skipped", "neutral", "pending")]
-        ci_line = f"{n_passed}/{n_total} checks passed"
-        if failing:
-            ci_line += " — failed: " + ", ".join(failing)
-    else:
-        ci_line = "No CI checks found"
-
     # Action-specific extra line
     extra_line = ""
     if action_key == "merged":
@@ -304,7 +276,6 @@ def format_pr_entry(
         f"**Technical Impact:**\n{analysis['technical_impact']}\n\n"
         f"**Reviews:** {analysis['review_sentiment']}\n\n"
         f"**Quality:** {analysis['quality']}\n\n"
-        f"**CI:** {ci_line}\n\n"
         f"**Files changed ({len(files)} files | +{total_add} / -{total_del}):**\n"
         f"{files_md}\n\n"
         f"**Commits ({len(commits)}):**\n"
@@ -448,12 +419,6 @@ async def run_analysis() -> None:
         )
         log.info("PR RAW (first 300 chars): %s", pr_raw[:300])
 
-        # Extract head SHA for CI checks
-        try:
-            head_sha = json.loads(pr_raw)["head"]["sha"]
-        except (json.JSONDecodeError, KeyError):
-            head_sha = ""
-
         log.info("Fetching PR files")
         files_raw = await call_tool(
             session, "get_pr_files", owner=OWNER, repo=REPO, pr_number=pr_num
@@ -476,23 +441,18 @@ async def run_analysis() -> None:
             session, "get_pr_requested_reviewers", owner=OWNER, repo=REPO, pr_number=pr_num
         )
 
-        log.info("Fetching CI checks for head SHA %s", head_sha[:7] if head_sha else "unknown")
-        checks_raw = await call_tool(
-            session, "get_pr_checks", owner=OWNER, repo=REPO, head_sha=head_sha
-        ) if head_sha else "[]"
-
     # MCP session closed — server subprocess has exited
 
     # ── Step 2: Claude analysis ───────────────────────────────────────────────
     analysis = analyse_pr_with_claude(
-        pr_raw, files_raw, commits_raw, reviews_raw, reviewers_raw, checks_raw
+        pr_raw, files_raw, commits_raw, reviews_raw, reviewers_raw
     )
     log.info("Claude analysis: sentiment=%s, quality=%s",
              analysis.get("review_sentiment", "")[:30],
              analysis.get("quality", "")[:30])
 
     # ── Step 3: Format markdown entry ─────────────────────────────────────────
-    entry = format_pr_entry(pr_raw, files_raw, commits_raw, checks_raw, analysis)
+    entry = format_pr_entry(pr_raw, files_raw, commits_raw, analysis)
     log.info("Formatted PR wiki entry (%d chars)", len(entry))
 
     # ── Step 4: Update wiki ───────────────────────────────────────────────────
